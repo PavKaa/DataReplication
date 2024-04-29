@@ -1,0 +1,130 @@
+version: '3.9'
+
+services:
+  zookeeper:
+    container_name: zookeeper
+    image: confluentinc/cp-zookeeper:latest
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - 2181:2181
+
+  kafka1:
+    container_name: first_kafka_broker
+    image: confluentinc/cp-kafka:latest
+    depends_on:
+      - zookeeper
+    ports:
+      - 29092:9092
+    hostname: kafka1
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka1:9092, PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT, PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 2
+
+  kafka2:
+    container_name: second_kafka_broker
+    image: confluentinc/cp-kafka:latest
+    depends_on:
+      - zookeeper
+    ports:
+      - 29093:9093
+    hostname: kafka2
+    environment:
+      KAFKA_BROKER_ID: 2
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka2:9093, PLAINTEXT_HOST://localhost:29093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT, PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 2
+
+  kafka-ui:
+    container_name: ui_kafka
+    image: provectuslabs/kafka-ui
+    ports:
+      - 8090:8080
+    restart: always
+    environment:
+      - KAFKA_CLUSTERS_0_NAME=local
+      - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka1:9092,kafka2:9093
+      - KAFKA_CLUSTERS_0_ZOOKEEPER=zookeeper:2181
+    links:
+      - kafka1
+      - kafka2
+      - zookeeper
+
+  first_api:
+    container_name: first_api
+    build: 
+      context: ./DataReplicationByKafka
+      dockerfile: Dockerfile
+    ports:
+      - 8080:80
+    environment:
+      ##- DATABASE_CONNECTION_STRING='Host=first_postgres_db;Port=5432;Database=DataReplication;User Id=postgres;Password=123456'
+      - ConnectionStrings__DefaultConnection=Host=first_postgres_db;Port=5432;Database=DataReplication;User Id=postgres;Password=123456
+      - Kafka__BootstrapServers=kafka2:9093
+      - Kafka__BootstrapServersConsume=kafka1:9092
+      - Kafka__PersonTopic=persons-topic
+      - Kafka__PersonDataTopic=persons-data-topic
+      - Kafka__ProjectTaskTopic=projects-tasks-topic
+      - Kafka__PartitionToConsume=0
+      - Kafka__PartitionToProduce=1
+    depends_on:
+      - first_postgres_db
+      - kafka1
+      - kafka2
+  
+  first_postgres_db:
+    container_name: first_postgres_db
+    image: postgres:16.2-alpine3.19
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 123456
+      POSTGRES_DB: DataReplication
+    ports:
+      - "5432"
+    volumes:
+      - first_postgres-data:/var/lib/postrgesql/data
+
+  second_api:
+    container_name: second_api
+    build: 
+      context: ./DataReplicationByKafka
+      dockerfile: Dockerfile
+    ports:
+      - 8081:80
+    environment:
+      - ConnectionStrings__DefaultConnection=Host=second_postgres_db;Port=5432;Database=DataReplication;User Id=postgres;Password=123456
+      - Kafka__BootstrapServers=kafka1:9092
+      - Kafka__BootstrapServersConsume=kafka2:9093
+      - Kafka__PersonTopic=persons-topic
+      - Kafka__PersonDataTopic=persons-data-topic
+      - Kafka__ProjectTaskTopic=projects-tasks-topic
+      - Kafka__PartitionToConsume=1
+      - Kafka__PartitionToProduce=0
+    depends_on:
+      - second_postgres_db
+      - kafka1
+      - kafka2
+  
+  second_postgres_db:
+    container_name: second_postgres_db
+    image: postgres:16.2-alpine3.19
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 123456
+      POSTGRES_DB: DataReplication
+    ports:
+      - "5432"
+    volumes:
+      - second_postgres-data:/var/lib/postrgesql/data
+
+volumes:
+  first_postgres-data:
+  second_postgres-data:
+    
